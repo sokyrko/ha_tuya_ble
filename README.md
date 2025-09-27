@@ -66,7 +66,7 @@ The integration works locally, but connection to Tuya BLE device requires device
 
 * Covers (category_id 'cl')
   + Moes Roller Blind Motor (product_id '4pbr8eig')
-  + Amazon Hey Blinds (product_id 'vlwf3ud6')
+  + Amazon HeyBlinds (product_id 'vlwf3ud6')
 
 * Water valve controller (category_id 'sfkzq')
   + Water valve controller (product_id 'nxquc5lb')
