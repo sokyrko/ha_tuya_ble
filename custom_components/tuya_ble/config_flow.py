@@ -58,11 +58,11 @@ def _extract_uuid_from_advertisement(discovery_info: BluetoothServiceInfoBleak) 
     Reuses TuyaBLE's _decode_advertisement_data() logic to avoid duplication.
     """
     try:
-        from .tuya_ble.tuya_ble import TuyaBLE
+        from .tuya_ble.tuya_ble import TuyaBLEDevice
 
-        # Create temporary TuyaBLE instance to decode advertisement
+        # Create temporary TuyaBLEDevice instance to decode advertisement
         # hass=None is fine - it's only needed for actual device operations
-        temp_device = TuyaBLE(
+        temp_device = TuyaBLEDevice(
             hass=None,
             ble_device=discovery_info.device,
             advertisement_data=discovery_info.advertisement,
