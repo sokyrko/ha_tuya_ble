@@ -53,30 +53,64 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _extract_uuid_from_advertisement(discovery_info: BluetoothServiceInfoBleak) -> str | None:
-    """Extract UUID from BLE advertisement data for fallback matching.
-
-    Reuses TuyaBLE's _decode_advertisement_data() logic to avoid duplication.
-    """
+    """Extract UUID from BLE advertisement data for fallback matching."""
     try:
-        from .tuya_ble.tuya_ble import TuyaBLEDevice
-
-        # Create temporary TuyaBLEDevice instance to decode advertisement
-        # hass=None is fine - it's only needed for actual device operations
-        temp_device = TuyaBLEDevice(
-            hass=None,
-            ble_device=discovery_info.device,
-            advertisement_data=discovery_info.advertisement,
-            device_info=None,
+        _LOGGER.debug(
+            "Attempting to extract UUID from %s, service_data keys: %s, manufacturer_data keys: %s",
+            discovery_info.address,
+            list(discovery_info.service_data.keys()) if discovery_info.service_data else None,
+            list(discovery_info.manufacturer_data.keys()) if discovery_info.manufacturer_data else None,
         )
 
-        # UUID is extracted during init via _decode_advertisement_data()
-        uuid = temp_device._uuid if hasattr(temp_device, '_uuid') else None
+        # Get product_id from service data - try both UUIDs
+        service_data = discovery_info.service_data.get(SERVICE_UUID)
+        if not service_data or len(service_data) < 2:
+            service_data = discovery_info.service_data.get(SERVICE_UUID_TEMP)
+        if not service_data or len(service_data) < 2:
+            _LOGGER.debug("No valid service data found for %s", discovery_info.address)
+            return None
 
-        if uuid:
-            _LOGGER.debug("Successfully extracted UUID: %s for device %s", uuid, discovery_info.address)
+        # Service data format: first byte is flags, then product_id
+        # Type 0x00 = product_id directly, 0x41 = product_id with length prefix
+        if service_data[0] == 0x00:
+            raw_product_id = service_data[1:]
+        elif service_data[0] == 0x41:
+            # Format: 0x41 0x00 0x00 length product_id_bytes...
+            # Skip first 4 bytes (0x41 0x00 0x00 length)
+            if len(service_data) < 5:
+                _LOGGER.debug("Service data too short for type 0x41")
+                return None
+            raw_product_id = service_data[4:]
         else:
-            _LOGGER.debug("Could not extract UUID for %s", discovery_info.address)
+            _LOGGER.debug("Service data type is %s, not 0x00 or 0x41 (product_id)", service_data[0])
+            return None
+        product_id_str = raw_product_id.decode('utf-8')
+        _LOGGER.debug("Extracted product_id: %s", product_id_str)
 
+        # Get encrypted UUID from manufacturer data
+        # Format: [6 bytes header][16 bytes encrypted UUID]
+        manufacturer_data = discovery_info.manufacturer_data.get(MANUFACTURER_DATA_ID)
+        if not manufacturer_data or len(manufacturer_data) <= 6:
+            _LOGGER.debug("No valid manufacturer data found for %s (length: %s)", discovery_info.address, len(manufacturer_data) if manufacturer_data else 0)
+            return None
+
+        raw_uuid = manufacturer_data[6:]  # Extract encrypted UUID starting at byte 6
+        _LOGGER.debug("raw_uuid: %s", raw_uuid.hex())
+
+        # UUID must be 16 bytes for AES decryption
+        if len(raw_uuid) != 16:
+            _LOGGER.debug("UUID data is not 16 bytes (got %d bytes) for %s", len(raw_uuid), discovery_info.address)
+            return None
+
+        # Decrypt UUID using product_id as key (MD5 hash used as both key and IV)
+        key = hashlib.md5(raw_product_id).digest()
+        _LOGGER.debug("MD5 key: %s", key.hex())
+        cipher = AES.new(key, AES.MODE_CBC, key)
+        decrypted_uuid = cipher.decrypt(raw_uuid)
+        _LOGGER.debug("Decrypted bytes: %s", decrypted_uuid.hex())
+        uuid = decrypted_uuid.decode("utf-8").rstrip('\x00')
+
+        _LOGGER.debug("Successfully extracted UUID: %s for device %s", uuid, discovery_info.address)
         return uuid
     except Exception as e:
         _LOGGER.warning("Failed to extract UUID from advertisement for %s: %s", discovery_info.address, e, exc_info=True)
