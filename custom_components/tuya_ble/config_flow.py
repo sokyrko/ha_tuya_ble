@@ -70,11 +70,20 @@ def _extract_uuid_from_advertisement(discovery_info: BluetoothServiceInfoBleak) 
             _LOGGER.debug("No valid service data found for %s", discovery_info.address)
             return None
 
-        if service_data[0] != 0:  # Must be product_id type
-            _LOGGER.debug("Service data type is %s, not 0 (product_id)", service_data[0])
+        # Service data format: first byte is flags, then product_id
+        # Type 0x00 = product_id directly, 0x41 = product_id with length prefix
+        if service_data[0] == 0x00:
+            raw_product_id = service_data[1:]
+        elif service_data[0] == 0x41:
+            # Format: 0x41 0x00 0x00 length product_id_bytes...
+            # Skip first 4 bytes (0x41 0x00 0x00 length)
+            if len(service_data) < 5:
+                _LOGGER.debug("Service data too short for type 0x41")
+                return None
+            raw_product_id = service_data[4:]
+        else:
+            _LOGGER.debug("Service data type is %s, not 0x00 or 0x41 (product_id)", service_data[0])
             return None
-
-        raw_product_id = service_data[1:]
         product_id_str = raw_product_id.decode('utf-8')
         _LOGGER.debug("Extracted product_id: %s", product_id_str)
 
