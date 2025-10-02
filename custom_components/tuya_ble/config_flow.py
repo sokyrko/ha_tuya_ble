@@ -388,7 +388,6 @@ class TuyaBLEConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 _LOGGER.debug("Found credentials by MAC: %s", discovery_info.address)
 
-            self._data[CONF_ADDRESS] = discovery_info.address
             if credentials is None:
                 self._get_device_info_error = True
                 errors["base"] = "device_not_registered"
