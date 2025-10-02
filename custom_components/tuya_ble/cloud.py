@@ -189,17 +189,24 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
                                 factory_info[TUYA_FACTORY_INFO_MAC][i : i + 2]
                                 for i in range(0, 12, 2)
                             ).upper()
-                            item.credentials[mac] = {
+                            device_id = device.get("id")
+                            uuid = device.get("uuid")
+                            credentials_data = {
                                 CONF_ADDRESS: mac,
-                                CONF_UUID: device.get("uuid"),
+                                CONF_UUID: uuid,
                                 CONF_LOCAL_KEY: device.get("local_key"),
-                                CONF_DEVICE_ID: device.get("id"),
+                                CONF_DEVICE_ID: device_id,
                                 CONF_CATEGORY: device.get("category"),
                                 CONF_PRODUCT_ID: device.get("product_id"),
                                 CONF_DEVICE_NAME: device.get("name"),
                                 CONF_PRODUCT_MODEL: device.get("model"),
                                 CONF_PRODUCT_NAME: device.get("product_name"),
                             }
+                            # Store credentials indexed by MAC (primary)
+                            item.credentials[mac] = credentials_data
+                            # Also store by UUID for fallback matching when BLE MAC != cloud MAC
+                            if uuid:
+                                item.credentials[f"uuid:{uuid}"] = credentials_data
 
                             spec_response = await self._hass.async_add_executor_job(
                                 item.api.get,
@@ -265,6 +272,50 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
         for cache_item in _cache.values():
             self._data.update(cache_item.login)
             break
+
+    async def get_device_credentials_by_uuid(
+        self,
+        uuid: str,
+        force_update: bool = False,
+        save_data: bool = False,
+    ) -> TuyaBLEDeviceCredentials | None:
+        """Get credentials by UUID when MAC doesn't match."""
+        global _cache
+        result: TuyaBLEDeviceCredentials | None = None
+
+        cache_key: str | None = None
+        if self._has_login(self._data):
+            cache_key = self._get_cache_key(self._data)
+            item = _cache.get(cache_key)
+
+            if item is None or force_update:
+                if self._is_login_success(await self.login(True)):
+                    item = _cache.get(cache_key)
+                    if item:
+                        await self._fill_cache_item(item)
+
+            if item:
+                credentials = item.credentials.get(f"uuid:{uuid}")
+                if credentials:
+                    result = TuyaBLEDeviceCredentials(
+                        credentials.get(CONF_UUID, ""),
+                        credentials.get(CONF_LOCAL_KEY, ""),
+                        credentials.get(CONF_DEVICE_ID, ""),
+                        credentials.get(CONF_CATEGORY, ""),
+                        credentials.get(CONF_PRODUCT_ID, ""),
+                        credentials.get(CONF_DEVICE_NAME, ""),
+                        credentials.get(CONF_PRODUCT_MODEL, ""),
+                        credentials.get(CONF_PRODUCT_NAME, ""),
+                        credentials.get(CONF_FUNCTIONS, []),
+                        credentials.get(CONF_STATUS_RANGE, []),
+                    )
+                    _LOGGER.debug("Retrieved by UUID %s: %s", uuid, result)
+                    if save_data:
+                        if item:
+                            self._data.update(item.login)
+                        self._data.update(credentials)
+
+        return result
 
     async def get_device_credentials(
         self,

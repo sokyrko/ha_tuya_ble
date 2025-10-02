@@ -27,7 +27,10 @@ from homeassistant.const import (
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowHandler, FlowResult
 
-from .tuya_ble import SERVICE_UUID, TuyaBLEDeviceCredentials
+from .tuya_ble import TuyaBLEDeviceCredentials
+from .tuya_ble.const import SERVICE_UUID, SERVICE_UUID_TEMP, MANUFACTURER_DATA_ID
+import hashlib
+from Crypto.Cipher import AES
 
 from .const import (
     TUYA_COUNTRIES,
@@ -47,6 +50,38 @@ from .devices import TuyaBLEData, get_device_readable_name
 from .cloud import HASSTuyaBLEDeviceManager
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _extract_uuid_from_advertisement(discovery_info: BluetoothServiceInfoBleak) -> str | None:
+    """Extract UUID from BLE advertisement data for fallback matching."""
+    try:
+        # Get product_id from service data
+        service_data = discovery_info.service_data.get(SERVICE_UUID_TEMP)
+        if not service_data or len(service_data) < 2:
+            return None
+
+        if service_data[0] != 0:  # Must be product_id type
+            return None
+
+        raw_product_id = service_data[1:]
+
+        # Get encrypted UUID from manufacturer data
+        manufacturer_data = discovery_info.manufacturer_data.get(MANUFACTURER_DATA_ID)
+        if not manufacturer_data or len(manufacturer_data) <= 6:
+            return None
+
+        raw_uuid = manufacturer_data[6:]
+
+        # Decrypt UUID using product_id as key
+        key = hashlib.md5(raw_product_id).digest()
+        cipher = AES.new(key, AES.MODE_CBC, key)
+        decrypted_uuid = cipher.decrypt(raw_uuid)
+        uuid = decrypted_uuid.decode("utf-8").rstrip('\x00')
+
+        return uuid
+    except Exception as e:
+        _LOGGER.debug("Failed to extract UUID from advertisement: %s", e)
+        return None
 
 
 async def _try_login(
@@ -295,6 +330,21 @@ class TuyaBLEConfigFlow(ConfigFlow, domain=DOMAIN):
             credentials = await self._manager.get_device_credentials(
                 discovery_info.address, self._get_device_info_error, True
             )
+
+            # If MAC matching fails, try UUID-based matching
+            # This handles devices where BLE MAC != cloud factory MAC
+            if credentials is None:
+                uuid = _extract_uuid_from_advertisement(discovery_info)
+                if uuid:
+                    _LOGGER.info(
+                        "MAC %s not found in cloud, trying UUID fallback: %s",
+                        discovery_info.address,
+                        uuid,
+                    )
+                    credentials = await self._manager.get_device_credentials_by_uuid(
+                        uuid, self._get_device_info_error, True
+                    )
+
             self._data[CONF_ADDRESS] = discovery_info.address
             if credentials is None:
                 self._get_device_info_error = True
