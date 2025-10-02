@@ -88,18 +88,13 @@ def _extract_uuid_from_advertisement(discovery_info: BluetoothServiceInfoBleak) 
         _LOGGER.debug("Extracted product_id: %s", product_id_str)
 
         # Get encrypted UUID from manufacturer data
+        # Format: [4 bytes header][16 bytes encrypted UUID]
         manufacturer_data = discovery_info.manufacturer_data.get(MANUFACTURER_DATA_ID)
-        if not manufacturer_data or len(manufacturer_data) <= 6:
-            _LOGGER.debug("No valid manufacturer data found for %s", discovery_info.address)
+        if not manufacturer_data or len(manufacturer_data) < 20:
+            _LOGGER.debug("No valid manufacturer data found for %s (length: %s)", discovery_info.address, len(manufacturer_data) if manufacturer_data else 0)
             return None
 
-        raw_uuid = manufacturer_data[6:]
-        _LOGGER.debug("raw_uuid length: %d, data: %s", len(raw_uuid), raw_uuid.hex())
-
-        # AES CBC requires data to be multiple of 16 bytes
-        if len(raw_uuid) % 16 != 0:
-            _LOGGER.debug("Manufacturer data UUID not 16-byte aligned (length %d) for %s", len(raw_uuid), discovery_info.address)
-            return None
+        raw_uuid = manufacturer_data[4:20]  # Extract 16 bytes starting at offset 4
 
         # Decrypt UUID using product_id as key
         key = hashlib.md5(raw_product_id).digest()
