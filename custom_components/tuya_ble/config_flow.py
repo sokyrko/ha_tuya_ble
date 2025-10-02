@@ -95,11 +95,14 @@ def _extract_uuid_from_advertisement(discovery_info: BluetoothServiceInfoBleak) 
             return None
 
         raw_uuid = manufacturer_data[4:20]  # Extract 16 bytes starting at offset 4
+        _LOGGER.debug("raw_uuid: %s", raw_uuid.hex())
 
         # Decrypt UUID using product_id as key
         key = hashlib.md5(raw_product_id).digest()
+        _LOGGER.debug("MD5 key: %s", key.hex())
         cipher = AES.new(key, AES.MODE_CBC, key)
         decrypted_uuid = cipher.decrypt(raw_uuid)
+        _LOGGER.debug("Decrypted bytes: %s", decrypted_uuid.hex())
         uuid = decrypted_uuid.decode("utf-8").rstrip('\x00')
 
         _LOGGER.debug("Successfully extracted UUID: %s for device %s", uuid, discovery_info.address)
