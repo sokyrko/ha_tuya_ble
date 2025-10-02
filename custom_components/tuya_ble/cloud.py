@@ -324,6 +324,85 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
 
         return result
 
+    async def get_device_credentials_by_product_id(
+        self,
+        product_id: str,
+        ble_address: str,
+        force_update: bool = False,
+        save_data: bool = False,
+    ) -> TuyaBLEDeviceCredentials | None:
+        """Get credentials by product_id when MAC and UUID don't match.
+
+        This is a last-resort fallback that returns the first unconfigured device
+        with the given product_id. Only use when you have exactly one device of
+        this product type that needs to be added.
+        """
+        global _cache
+        result: TuyaBLEDeviceCredentials | None = None
+
+        cache_key: str | None = None
+        if self._has_login(self._data):
+            cache_key = self._get_cache_key(self._data)
+            item = _cache.get(cache_key)
+
+            if item is None or force_update:
+                if self._is_login_success(await self.login(True)):
+                    item = _cache.get(cache_key)
+                    if item:
+                        await self._fill_cache_item(item)
+
+            if item:
+                # Get list of already configured device IDs
+                from homeassistant.const import CONF_DEVICE_ID
+                configured_device_ids = set()
+                ble_entries = self._hass.config_entries.async_entries(DOMAIN)
+                for entry in ble_entries:
+                    device_id = entry.options.get(CONF_DEVICE_ID)
+                    if device_id:
+                        configured_device_ids.add(device_id)
+
+                # Find all unconfigured devices with matching product_id
+                matching_devices = []
+                for cred_key, cred_data in item.credentials.items():
+                    if cred_key.startswith("uuid:"):
+                        continue  # Skip UUID-indexed entries
+                    if cred_data.get(CONF_PRODUCT_ID) == product_id:
+                        device_id = cred_data.get(CONF_DEVICE_ID)
+                        if device_id not in configured_device_ids:
+                            matching_devices.append(cred_data)
+
+                _LOGGER.info("Found %d unconfigured devices with product_id %s", len(matching_devices), product_id)
+
+                # If there's exactly one unconfigured match, use it
+                if len(matching_devices) == 1:
+                    credentials = matching_devices[0]
+                    result = TuyaBLEDeviceCredentials(
+                        credentials.get(CONF_UUID, ""),
+                        credentials.get(CONF_LOCAL_KEY, ""),
+                        credentials.get(CONF_DEVICE_ID, ""),
+                        credentials.get(CONF_CATEGORY, ""),
+                        credentials.get(CONF_PRODUCT_ID, ""),
+                        credentials.get(CONF_DEVICE_NAME, ""),
+                        credentials.get(CONF_PRODUCT_MODEL, ""),
+                        credentials.get(CONF_PRODUCT_NAME, ""),
+                        credentials.get(CONF_FUNCTIONS, []),
+                        credentials.get(CONF_STATUS_RANGE, []),
+                    )
+                    _LOGGER.info("Using single unconfigured device match for product_id %s: %s", product_id, result)
+                    if save_data:
+                        if item:
+                            self._data.update(item.login)
+                        # Override the MAC address with the BLE MAC for this entry
+                        cred_copy = credentials.copy()
+                        cred_copy[CONF_ADDRESS] = ble_address
+                        self._data.update(cred_copy)
+                elif len(matching_devices) > 1:
+                    _LOGGER.warning("Multiple unconfigured devices found with product_id %s, cannot auto-match. Add them one at a time.", product_id)
+                else:
+                    _LOGGER.warning("No unconfigured devices found with product_id %s", product_id)
+
+        return result
+
     async def get_device_credentials(
         self,
         address: str,

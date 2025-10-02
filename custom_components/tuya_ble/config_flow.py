@@ -385,6 +385,34 @@ class TuyaBLEConfigFlow(ConfigFlow, domain=DOMAIN):
                         _LOGGER.warning("UUID %s also not found in cloud", uuid)
                 else:
                     _LOGGER.warning("Failed to extract UUID from advertisement for %s", discovery_info.address)
+
+                # If UUID extraction/matching failed, try matching by product_id
+                # Extract product_id from service data and try to find matching device
+                if credentials is None and discovery_info.service_data:
+                    try:
+                        from .tuya_ble.const import SERVICE_UUID, SERVICE_UUID_TEMP
+                        service_data = discovery_info.service_data.get(SERVICE_UUID)
+                        if not service_data:
+                            service_data = discovery_info.service_data.get(SERVICE_UUID_TEMP)
+
+                        if service_data and len(service_data) >= 5:
+                            if service_data[0] == 0x00:
+                                product_id_bytes = service_data[1:]
+                            elif service_data[0] == 0x41:
+                                product_id_bytes = service_data[4:]
+                            else:
+                                product_id_bytes = None
+
+                            if product_id_bytes:
+                                product_id = product_id_bytes.decode('utf-8')
+                                _LOGGER.info("Attempting product_id based matching for %s (product_id: %s)", discovery_info.address, product_id)
+                                credentials = await self._manager.get_device_credentials_by_product_id(
+                                    product_id, discovery_info.address, self._get_device_info_error, True
+                                )
+                                if credentials:
+                                    _LOGGER.info("Successfully matched device by product_id: %s", product_id)
+                    except Exception as e:
+                        _LOGGER.debug("Failed to match by product_id: %s", e)
             else:
                 _LOGGER.debug("Found credentials by MAC: %s", discovery_info.address)
 
