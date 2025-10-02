@@ -189,6 +189,13 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
                                 factory_info[TUYA_FACTORY_INFO_MAC][i : i + 2]
                                 for i in range(0, 12, 2)
                             ).upper()
+                            _LOGGER.debug(
+                                "Device %s (%s, %s): Factory MAC from cloud = %s",
+                                device.get("id"),
+                                device.get("name"),
+                                device.get("product_id"),
+                                mac,
+                            )
                             device_id = device.get("id")
                             uuid = device.get("uuid")
                             credentials_data = {
