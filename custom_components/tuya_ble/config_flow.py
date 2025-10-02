@@ -55,19 +55,33 @@ _LOGGER = logging.getLogger(__name__)
 def _extract_uuid_from_advertisement(discovery_info: BluetoothServiceInfoBleak) -> str | None:
     """Extract UUID from BLE advertisement data for fallback matching."""
     try:
-        # Get product_id from service data
-        service_data = discovery_info.service_data.get(SERVICE_UUID_TEMP)
+        _LOGGER.debug(
+            "Attempting to extract UUID from %s, service_data keys: %s, manufacturer_data keys: %s",
+            discovery_info.address,
+            list(discovery_info.service_data.keys()) if discovery_info.service_data else None,
+            list(discovery_info.manufacturer_data.keys()) if discovery_info.manufacturer_data else None,
+        )
+
+        # Get product_id from service data - try both UUIDs
+        service_data = discovery_info.service_data.get(SERVICE_UUID)
         if not service_data or len(service_data) < 2:
+            service_data = discovery_info.service_data.get(SERVICE_UUID_TEMP)
+        if not service_data or len(service_data) < 2:
+            _LOGGER.debug("No valid service data found for %s", discovery_info.address)
             return None
 
         if service_data[0] != 0:  # Must be product_id type
+            _LOGGER.debug("Service data type is %s, not 0 (product_id)", service_data[0])
             return None
 
         raw_product_id = service_data[1:]
+        product_id_str = raw_product_id.decode('utf-8')
+        _LOGGER.debug("Extracted product_id: %s", product_id_str)
 
         # Get encrypted UUID from manufacturer data
         manufacturer_data = discovery_info.manufacturer_data.get(MANUFACTURER_DATA_ID)
         if not manufacturer_data or len(manufacturer_data) <= 6:
+            _LOGGER.debug("No valid manufacturer data found for %s", discovery_info.address)
             return None
 
         raw_uuid = manufacturer_data[6:]
@@ -78,9 +92,10 @@ def _extract_uuid_from_advertisement(discovery_info: BluetoothServiceInfoBleak) 
         decrypted_uuid = cipher.decrypt(raw_uuid)
         uuid = decrypted_uuid.decode("utf-8").rstrip('\x00')
 
+        _LOGGER.debug("Successfully extracted UUID: %s for device %s", uuid, discovery_info.address)
         return uuid
     except Exception as e:
-        _LOGGER.debug("Failed to extract UUID from advertisement: %s", e)
+        _LOGGER.warning("Failed to extract UUID from advertisement for %s: %s", discovery_info.address, e, exc_info=True)
         return None
 
 
@@ -327,6 +342,7 @@ class TuyaBLEConfigFlow(ConfigFlow, domain=DOMAIN):
                 discovery_info.address, raise_on_progress=False
             )
             self._abort_if_unique_id_configured()
+            _LOGGER.debug("Attempting to get credentials for MAC: %s", discovery_info.address)
             credentials = await self._manager.get_device_credentials(
                 discovery_info.address, self._get_device_info_error, True
             )
@@ -334,6 +350,7 @@ class TuyaBLEConfigFlow(ConfigFlow, domain=DOMAIN):
             # If MAC matching fails, try UUID-based matching
             # This handles devices where BLE MAC != cloud factory MAC
             if credentials is None:
+                _LOGGER.info("MAC %s not found in cloud, attempting UUID fallback", discovery_info.address)
                 uuid = _extract_uuid_from_advertisement(discovery_info)
                 if uuid:
                     _LOGGER.info(
@@ -344,6 +361,14 @@ class TuyaBLEConfigFlow(ConfigFlow, domain=DOMAIN):
                     credentials = await self._manager.get_device_credentials_by_uuid(
                         uuid, self._get_device_info_error, True
                     )
+                    if credentials:
+                        _LOGGER.info("Successfully matched device by UUID: %s", uuid)
+                    else:
+                        _LOGGER.warning("UUID %s also not found in cloud", uuid)
+                else:
+                    _LOGGER.warning("Failed to extract UUID from advertisement for %s", discovery_info.address)
+            else:
+                _LOGGER.debug("Found credentials by MAC: %s", discovery_info.address)
 
             self._data[CONF_ADDRESS] = discovery_info.address
             if credentials is None:
