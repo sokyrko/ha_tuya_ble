@@ -88,33 +88,27 @@ def _extract_uuid_from_advertisement(discovery_info: BluetoothServiceInfoBleak) 
         _LOGGER.debug("Extracted product_id: %s", product_id_str)
 
         # Get encrypted UUID from manufacturer data
-        # Format: [4 bytes header][16 bytes encrypted UUID]
+        # Format: [6 bytes header][16 bytes encrypted UUID]
         manufacturer_data = discovery_info.manufacturer_data.get(MANUFACTURER_DATA_ID)
-        if not manufacturer_data or len(manufacturer_data) < 20:
+        if not manufacturer_data or len(manufacturer_data) <= 6:
             _LOGGER.debug("No valid manufacturer data found for %s (length: %s)", discovery_info.address, len(manufacturer_data) if manufacturer_data else 0)
             return None
 
-        raw_uuid = manufacturer_data[4:20]  # Extract 16 bytes starting at offset 4
+        raw_uuid = manufacturer_data[6:]  # Extract encrypted UUID starting at byte 6
         _LOGGER.debug("raw_uuid: %s", raw_uuid.hex())
 
-        # Decrypt UUID using product_id as key
+        # UUID must be 16 bytes for AES decryption
+        if len(raw_uuid) != 16:
+            _LOGGER.debug("UUID data is not 16 bytes (got %d bytes) for %s", len(raw_uuid), discovery_info.address)
+            return None
+
+        # Decrypt UUID using product_id as key (MD5 hash used as both key and IV)
         key = hashlib.md5(raw_product_id).digest()
         _LOGGER.debug("MD5 key: %s", key.hex())
-
-        # Try decryption with key as IV (original method)
-        try:
-            cipher = AES.new(key, AES.MODE_CBC, key)
-            decrypted_uuid = cipher.decrypt(raw_uuid)
-            _LOGGER.debug("Decrypted bytes (IV=key): %s", decrypted_uuid.hex())
-            uuid = decrypted_uuid.decode("utf-8").rstrip('\x00')
-        except UnicodeDecodeError:
-            # Try with zero IV
-            _LOGGER.debug("Failed with IV=key, trying IV=zeros")
-            iv = b'\x00' * 16
-            cipher = AES.new(key, AES.MODE_CBC, iv)
-            decrypted_uuid = cipher.decrypt(raw_uuid)
-            _LOGGER.debug("Decrypted bytes (IV=zeros): %s", decrypted_uuid.hex())
-            uuid = decrypted_uuid.decode("utf-8").rstrip('\x00')
+        cipher = AES.new(key, AES.MODE_CBC, key)
+        decrypted_uuid = cipher.decrypt(raw_uuid)
+        _LOGGER.debug("Decrypted bytes: %s", decrypted_uuid.hex())
+        uuid = decrypted_uuid.decode("utf-8").rstrip('\x00')
 
         _LOGGER.debug("Successfully extracted UUID: %s for device %s", uuid, discovery_info.address)
         return uuid
