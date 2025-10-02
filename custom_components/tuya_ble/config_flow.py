@@ -390,7 +390,6 @@ class TuyaBLEConfigFlow(ConfigFlow, domain=DOMAIN):
                 # Extract product_id from service data and try to find matching device
                 if credentials is None and discovery_info.service_data:
                     try:
-                        from .tuya_ble.const import SERVICE_UUID, SERVICE_UUID_TEMP
                         service_data = discovery_info.service_data.get(SERVICE_UUID)
                         if not service_data:
                             service_data = discovery_info.service_data.get(SERVICE_UUID_TEMP)
