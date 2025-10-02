@@ -100,10 +100,21 @@ def _extract_uuid_from_advertisement(discovery_info: BluetoothServiceInfoBleak) 
         # Decrypt UUID using product_id as key
         key = hashlib.md5(raw_product_id).digest()
         _LOGGER.debug("MD5 key: %s", key.hex())
-        cipher = AES.new(key, AES.MODE_CBC, key)
-        decrypted_uuid = cipher.decrypt(raw_uuid)
-        _LOGGER.debug("Decrypted bytes: %s", decrypted_uuid.hex())
-        uuid = decrypted_uuid.decode("utf-8").rstrip('\x00')
+
+        # Try decryption with key as IV (original method)
+        try:
+            cipher = AES.new(key, AES.MODE_CBC, key)
+            decrypted_uuid = cipher.decrypt(raw_uuid)
+            _LOGGER.debug("Decrypted bytes (IV=key): %s", decrypted_uuid.hex())
+            uuid = decrypted_uuid.decode("utf-8").rstrip('\x00')
+        except UnicodeDecodeError:
+            # Try with zero IV
+            _LOGGER.debug("Failed with IV=key, trying IV=zeros")
+            iv = b'\x00' * 16
+            cipher = AES.new(key, AES.MODE_CBC, iv)
+            decrypted_uuid = cipher.decrypt(raw_uuid)
+            _LOGGER.debug("Decrypted bytes (IV=zeros): %s", decrypted_uuid.hex())
+            uuid = decrypted_uuid.decode("utf-8").rstrip('\x00')
 
         _LOGGER.debug("Successfully extracted UUID: %s for device %s", uuid, discovery_info.address)
         return uuid
