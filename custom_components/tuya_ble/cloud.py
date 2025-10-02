@@ -417,6 +417,7 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
 
         if not force_update and self._has_credentials(self._data):
             credentials = self._data.copy()
+            _LOGGER.debug("Using credentials from self._data for %s", address)
         else:
             cache_key: str | None = None
             if self._has_login(self._data):
@@ -430,6 +431,7 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
                 item = _cache.get(cache_key)
 
             if item is None or force_update:
+                _LOGGER.debug("Cache miss or force_update for %s, rebuilding cache", address)
                 if self._is_login_success(await self.login(True)):
                     item = _cache.get(cache_key)
                     if item:
@@ -437,6 +439,10 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
 
             if item:
                 credentials = item.credentials.get(address)
+                if credentials:
+                    _LOGGER.debug("Found credentials in cache for %s: %s", address, credentials.get(CONF_DEVICE_NAME))
+                else:
+                    _LOGGER.debug("No credentials in cache for %s", address)
 
         if credentials:
             result = TuyaBLEDeviceCredentials(
