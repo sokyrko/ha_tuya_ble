@@ -529,6 +529,16 @@ devices_database: dict[str, TuyaBLECategoryInfo] = {
             ),
         },
     ),
+    "zwjcy": TuyaBLECategoryInfo(
+        products={
+            "gvygg3m8": TuyaBLEProductInfo(  # device product_id
+                name="Smartlife Plant Sensor SGS01",
+            ),
+            "jabotj1z": TuyaBLEProductInfo(  # device product_id
+                name="SRB-PM01",
+            ),
+        },
+    ),
     "sfkzq": TuyaBLECategoryInfo(
         products={
             **dict.fromkeys(
